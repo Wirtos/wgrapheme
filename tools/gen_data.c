@@ -297,6 +297,15 @@ typedef struct {
 
 WGraphemeGenCtx ctx;
 
+WStrView read_file_into_buf(FILE *fp, size_t read_max, char *buf, char **end) {
+    size_t len = fread(buf, 1, read_max, fp);
+    if (fgetc(fp) != EOF)
+        fail("Invalid file size read");
+    buf[len] = '\0';
+    *end = buf + len + 1;
+    return (WStrView){buf, len};
+}
+
 int main(int argc, char *argv[]) {
     if (argc != 4)
         fail("usage: gen_data <UCD_DIR> <UNICODE_VER> <OUTPUT_HEADER_FILE>");
@@ -329,18 +338,9 @@ int main(int argc, char *argv[]) {
         }
 
         char *sbuf = sbuf_mem;
-        DerivedCorePropertiesLen = fread(sbuf, sizeof(uint8_t), DerivedCorePropertiesLen, DerivedCoreProperties);
-        ctx.DerivedCoreProperties = (WStrView) {sbuf, DerivedCorePropertiesLen};
-        sbuf += DerivedCorePropertiesLen;
-        *(sbuf++) = '\0';
-        EmojiDataLen = fread(sbuf, sizeof(uint8_t), EmojiDataLen, EmojiData);
-        ctx.EmojiData = (WStrView) {sbuf, EmojiDataLen};
-        sbuf += EmojiDataLen;
-        *(sbuf++) = '\0';
-        GraphemeBreakPropertyLen = fread(sbuf, sizeof(uint8_t), GraphemeBreakPropertyLen, GraphemeBreakProperty);
-        ctx.GraphemeBreakProperty = (WStrView) {sbuf, GraphemeBreakPropertyLen};
-        sbuf += GraphemeBreakPropertyLen;
-        *sbuf = '\0';
+        ctx.DerivedCoreProperties = read_file_into_buf(DerivedCoreProperties, DerivedCorePropertiesLen, sbuf, &sbuf);
+        ctx.EmojiData = read_file_into_buf(EmojiData, EmojiDataLen, sbuf, &sbuf);
+        ctx.GraphemeBreakProperty = read_file_into_buf(GraphemeBreakProperty, GraphemeBreakPropertyLen, sbuf, &sbuf);
 
         ctx_init_categories(&ctx);
 
@@ -411,19 +411,19 @@ int main(int argc, char *argv[]) {
 
         fprintf(res, "const uint8_t wgrapheme_range_prop[WGRAPHEME_RANGE_COUNT] = {");
         for (size_t i = 0; i < len_prop_ranges; i++) {
-            fprintf(res, (i == len_prop_ranges - 1) ? "%d" : "%d,", prop_ranges[i].prop);
+            fprintf(res, ",%d" + (i == 0), prop_ranges[i].prop);
         }
         fprintf(res, "};\n");
 
         /* split the [cp_begin, cp_end - 1] range into lo and hi arrays */
         fprintf(res, "const uint32_t wgrapheme_range_cp_hi[WGRAPHEME_RANGE_COUNT] = {");
         for (size_t i = 0; i < len_prop_ranges; i++) {
-            fprintf(res, (i == len_prop_ranges - 1) ? "%d" : "%d,", prop_ranges[i].end - 1); /* ranges are inclusive */
+            fprintf(res, ",%d" + (i == 0), prop_ranges[i].end - 1); /* ranges are inclusive */
         }
         fprintf(res, "};\n");
         fprintf(res, "const uint32_t wgrapheme_range_cp_lo[WGRAPHEME_RANGE_COUNT] = {");
         for (size_t i = 0; i < len_prop_ranges; i++) {
-            fprintf(res, (i == len_prop_ranges - 1) ? "%d" : "%d,", prop_ranges[i].begin);
+            fprintf(res, ",%d" + (i == 0), prop_ranges[i].begin);
         }
         fprintf(res, "};\n");
 
@@ -434,7 +434,7 @@ int main(int argc, char *argv[]) {
             /* find first range that potentially contains this codepoint (CAT_OTHER codepoints are excluded to save space), end is exclusive thus <= */
             while (lookup_range_idx < len_prop_ranges && prop_ranges[lookup_range_idx].end <= cp_lookup_from)
                 lookup_range_idx += 1;
-            fprintf(res, (i == LOOKUP_TABLE_LEN - 1) ? "%d" : "%d,", lookup_range_idx);
+            fprintf(res, ",%d" + (i == 0), lookup_range_idx);
         }
         fprintf(res, "};\n");
 
