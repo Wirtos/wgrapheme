@@ -1,0 +1,31 @@
+#ifndef WGRAPHEME_CATEGORIES_H
+#define WGRAPHEME_CATEGORIES_H
+
+enum WGraphemeCategory {
+    WGRAPHEME_CAT_START = 0, /* virtual category for GB1 */
+    WGRAPHEME_CAT_OTHER = 1, /* virtual category for other categories, functionally same as ANY in GB rules */
+    WGRAPHEME_CAT_CR = 2,
+    WGRAPHEME_CAT_LF = 3,
+    WGRAPHEME_CAT_CONTROL = 4,
+    WGRAPHEME_CAT_EXTEND = 5,
+    WGRAPHEME_CAT_L = 6,
+    WGRAPHEME_CAT_V = 7,
+    WGRAPHEME_CAT_T = 8,
+    WGRAPHEME_CAT_LV = 9,
+    WGRAPHEME_CAT_LVT = 10,
+    WGRAPHEME_CAT_REGIONAL_INDICATOR = 11,
+    WGRAPHEME_CAT_SPACINGMARK = 12,
+    WGRAPHEME_CAT_PREPEND = 13,
+    WGRAPHEME_CAT_ZWJ = 14,
+    WGRAPHEME_CAT_EXTENDED_PICTOGRAPHIC = 15,
+    WGRAPHEME_CAT_E_ZWG = 16 /* virtual category for GB11 */
+};
+
+enum WGraphemeINCB {
+    WGRAPHEME_INCB_NONE = 0,
+    WGRAPHEME_INCB_LINKER = 1,
+    WGRAPHEME_INCB_CONSONANT = 2,
+    WGRAPHEME_INCB_EXTEND = 3
+};
+
+#endif
