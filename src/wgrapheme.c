@@ -7,17 +7,13 @@
 
 #include <stdio.h>
 
-#define WGRAPHEME_VER_MAJOR 0
-#define WGRAPHEME_VER_MINOR 1
-#define WGRAPHEME_VER_PATCH 0
-
 #define arrlen(arr) (sizeof(arr) / sizeof((arr)[0]))
 
 typedef struct {
     uint32_t lower;
     uint32_t upper;
     uint8_t prop;
-} wgrapheme_prop_range_t;
+} WPropRange;
 
 static uint8_t wgrapheme_prop_pack(enum WGraphemeCategory cat, enum WGraphemeINCB incb) {
     return (uint8_t) (cat & 0x1F | (incb & 0x03) << 5);
@@ -94,7 +90,7 @@ static wgrapheme_status_t wgrapheme_decode_utf8(const uint8_t *string, size_t le
     return WGRAPHEME_OK;
 }
 
-static void wgrapheme_ascii_prop(uint32_t codepoint, wgrapheme_prop_range_t *range) {
+static void wgrapheme_ascii_prop(uint32_t codepoint, WPropRange *range) {
     if (codepoint >= 0x20) {
         range->lower = 0x20;
         range->upper = 0x7E;
@@ -114,7 +110,7 @@ static void wgrapheme_ascii_prop(uint32_t codepoint, wgrapheme_prop_range_t *ran
     }
 }
 
-static void wgrapheme_lookup_prop(uint32_t codepoint, wgrapheme_prop_range_t *cache) {
+static void wgrapheme_lookup_prop(uint32_t codepoint, WPropRange *cache) {
     uint16_t idx;
     uint32_t lo;
     uint32_t hi;
@@ -289,7 +285,7 @@ unsigned wgrapheme_version(void) {
 
 const char *wgrapheme_unicode_version(void) { return WGRAPHEME_UNICODE_VERSION; }
 
-void wgrapheme_iter_init(wgrapheme_iter_t *iter, const uint8_t *string, size_t length) {
+void wgrapheme_iter_init(wgrapheme_iter_t *iter, const char *string, size_t length) {
     if (!iter) {
         return;
     }
@@ -298,8 +294,9 @@ void wgrapheme_iter_init(wgrapheme_iter_t *iter, const uint8_t *string, size_t l
     iter->cursor = 0;
 }
 
-wgrapheme_status_t wgrapheme_next_boundary(const uint8_t *string, size_t length, size_t offset, size_t *next) {
-    wgrapheme_prop_range_t cache = {0, 0, 0};
+wgrapheme_status_t wgrapheme_next_boundary(const char *str, size_t length, size_t offset, size_t *next) {
+    uint8_t *string = (uint8_t *) str;
+    WPropRange cache = {0, 0, 0};
     uint8_t left_prop;
     uint32_t codepoint;
     size_t consumed;
@@ -349,7 +346,8 @@ wgrapheme_status_t wgrapheme_next_boundary(const uint8_t *string, size_t length,
     return WGRAPHEME_OK;
 }
 
-wgrapheme_status_t wgrapheme_prev_boundary(const uint8_t *string, size_t length, size_t offset, size_t *previous) {
+wgrapheme_status_t wgrapheme_prev_boundary(const char *str, size_t length, size_t offset, size_t *previous) {
+    uint8_t *string = (uint8_t *) str;
     size_t cursor = 0;
     size_t next = 0;
     size_t last = 0;
@@ -370,7 +368,7 @@ wgrapheme_status_t wgrapheme_prev_boundary(const uint8_t *string, size_t length,
     }
 
     while (cursor < length) {
-        status = wgrapheme_next_boundary(string, length, cursor, &next);
+        status = wgrapheme_next_boundary((char *) string, length, cursor, &next);
         if (status < 0) {
             return status;
         }
@@ -410,7 +408,8 @@ wgrapheme_status_t wgrapheme_iter_next(wgrapheme_iter_t *iter, size_t *start, si
     return WGRAPHEME_OK;
 }
 
-wgrapheme_status_t wgrapheme_count(const uint8_t *string, size_t length, size_t *count) {
+wgrapheme_status_t wgrapheme_count(const char *str, size_t length, size_t *count) {
+    uint8_t *string = (uint8_t *) str;
     wgrapheme_iter_t iter;
     size_t start;
     size_t end;
@@ -421,7 +420,7 @@ wgrapheme_status_t wgrapheme_count(const uint8_t *string, size_t length, size_t 
         return WGRAPHEME_INVALID_ARGUMENT;
     }
 
-    wgrapheme_iter_init(&iter, string, length);
+    wgrapheme_iter_init(&iter, (char *) string, length);
     while ((status = wgrapheme_iter_next(&iter, &start, &end)) == WGRAPHEME_OK) {
         (void) start;
         (void) end;

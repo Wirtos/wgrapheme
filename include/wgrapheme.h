@@ -12,6 +12,10 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#define WGRAPHEME_VER_MAJOR 0
+#define WGRAPHEME_VER_MINOR 2
+#define WGRAPHEME_VER_PATCH 0
+
 #ifndef WGRAPHEME_SHARED_DEFINE
     #ifndef WGRAPHEME_EXPORT
         #define WGRAPHEME_EXPORT
@@ -45,7 +49,7 @@ typedef enum {
 } wgrapheme_status_t;
 
 typedef struct {
-  const uint8_t *string;
+  const char *string;
   size_t length;
   size_t cursor;
 } wgrapheme_iter_t;
@@ -56,7 +60,7 @@ WGRAPHEME_EXPORT const char *wgrapheme_unicode_version(void);
 
 WGRAPHEME_EXPORT void wgrapheme_iter_init(
   wgrapheme_iter_t *iter,
-  const uint8_t *string,
+  const char *string,
   size_t length
 );
 
@@ -74,7 +78,7 @@ WGRAPHEME_EXPORT wgrapheme_status_t wgrapheme_iter_next(
  * the output of a previous wgrapheme call).
  */
 WGRAPHEME_EXPORT wgrapheme_status_t wgrapheme_next_boundary(
-  const uint8_t *string,
+  const char *string,
   size_t length,
   size_t offset,
   size_t *next
@@ -84,7 +88,7 @@ WGRAPHEME_EXPORT wgrapheme_status_t wgrapheme_next_boundary(
  * Find the previous grapheme boundary before `offset`.
  */
 WGRAPHEME_EXPORT wgrapheme_status_t wgrapheme_prev_boundary(
-  const uint8_t *string,
+  const char *string,
   size_t length,
   size_t offset,
   size_t *previous
@@ -92,7 +96,7 @@ WGRAPHEME_EXPORT wgrapheme_status_t wgrapheme_prev_boundary(
 
 /* Count graphemes in a string */
 WGRAPHEME_EXPORT wgrapheme_status_t wgrapheme_count(
-  const uint8_t *string,
+  const char *string,
   size_t length,
   size_t *count
 );

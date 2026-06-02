@@ -87,13 +87,6 @@ const WUnicodeNameToCat unicode_incb_to_wgrapheme_incb[] = {{WSTRVC("None"), WGR
                                                             {WSTRVC("Extend"), WGRAPHEME_INCB_EXTEND}};
 
 
-typedef struct WGraphemeGenCtx {
-    WStrView DerivedCoreProperties;
-    WStrView EmojiData;
-    WStrView GraphemeBreakProperty;
-    uint8_t properties[UNICODE_CODEPOINT_COUNT];
-} WGraphemeGenCtx;
-
 long get_file_size(FILE *fp) {
     long size = 0;
     fseek(fp, 0, SEEK_END);
@@ -164,6 +157,11 @@ uint8_t find_incb(WStrView tok) {
     return 0;
 }
 
+/* Parse ucd file and return data from a line which is in format:
+ *  0ABCDE[..0ABCDF]  ; PROP_ONE [; PROP_TWO  ] # comment
+ *
+ *  Empty lines and comment lines are skipped
+ */
 int parse_ucd_cat_line(const char *begin, const char **next, uint32_t *cp_start, uint32_t *cp_end, WStrView *p1,
                        WStrView *p2) {
     *cp_start = 0;
@@ -235,67 +233,17 @@ int parse_ucd_cat_line(const char *begin, const char **next, uint32_t *cp_start,
     return 1;
 }
 
-
-void ctx_init_categories(WGraphemeGenCtx *ctx) {
-    WStrView p1, p2;
-    uint32_t cp_start = 0, cp_end = 0;
-
-    memset(&ctx->properties, WGRAPHEME_CAT_OTHER, sizeof(ctx->properties));
-    {
-        const char *it = ctx->GraphemeBreakProperty.str;
-        while (parse_ucd_cat_line(it, &it, &cp_start, &cp_end, &p1, &p2)) {
-            uint8_t cat = find_category(p1);
-            if(p2.str != NULL) fail("Expected GraphemeBreakProperty line to only have 1 property");
-            if (!cat)
-                continue;
-            for (uint32_t cp = cp_start; cp < cp_end; cp++) {
-                ctx->properties[cp] = cat;
-            }
-        }
-    }
-    {
-        const char *it = ctx->EmojiData.str;
-
-        while (parse_ucd_cat_line(it, &it, &cp_start, &cp_end, &p1, &p2)) {
-            uint8_t cat = find_category(p1);
-            if(p2.str != NULL) fail("Expected emoji-data to only have 1 property");
-            if (!cat)
-                continue;
-            for (uint32_t cp = cp_start; cp < cp_end; cp++) {
-                ctx->properties[cp] = cat;
-            }
-        }
-    }
-    {
-        const char *it = ctx->DerivedCoreProperties.str;
-
-        while (parse_ucd_cat_line(it, &it, &cp_start, &cp_end, &p1, &p2)) {
-            if (p2.str == NULL) {
-                continue;
-            }
-
-            /* if Indic Conjunct break property, read the second one */
-            if (!wstrv_equal(p1, WSTRV("InCB"))) {
-                continue;
-            }
-
-            uint8_t cat = find_incb(p2);
-
-            for (uint32_t cp = cp_start; cp < cp_end; cp++) {
-                ctx->properties[cp] |= (cat << 5);
-            }
-        }
-    }
-}
-
+typedef struct {
+    uint32_t lower;
+    uint32_t upper;
+    uint8_t prop;
+} WPropRange;
 
 typedef struct {
-    uint32_t begin;
-    uint32_t end;
-    uint8_t prop;
-} WPropertyRange;
-
-WGraphemeGenCtx ctx;
+    WPropRange *prop_ranges;
+    size_t len_prop_ranges;
+    uint8_t properties[UNICODE_CODEPOINT_COUNT];
+} WGraphemeGenCtx;
 
 WStrView read_file_into_buf(FILE *fp, size_t read_max, char *buf, char **end) {
     size_t len = fread(buf, 1, read_max, fp);
@@ -303,8 +251,174 @@ WStrView read_file_into_buf(FILE *fp, size_t read_max, char *buf, char **end) {
         fail("Invalid file size read");
     buf[len] = '\0';
     *end = buf + len + 1;
-    return (WStrView){buf, len};
+    return (WStrView) {buf, len};
 }
+
+void ctx_init(WGraphemeGenCtx *ctx, const char *ucd_dir) {
+    WStrView p1, p2;
+    uint32_t cp_start = 0, cp_end = 0;
+    WStrView ucd_derived_core_props;
+    WStrView ucd_emoji_data_props;
+    WStrView ucd_grapheme_break_props;
+
+    WPropRange *prop_ranges;
+    uint8_t *properties = ctx->properties;
+
+    memset(properties, WGRAPHEME_CAT_OTHER, sizeof(ctx->properties));
+
+    /* init properties */
+    {
+        char *sbuf_mem = NULL;
+        char dir_path[4096];
+        if (strlen(ucd_dir) > sizeof(dir_path) - 26) {
+            fail("ucd_dir too long");
+        }
+        {
+            sprintf(dir_path, "%s/DerivedCoreProperties.txt", ucd_dir);
+            FILE *DerivedCoreProperties = fopen(dir_path, "r");
+            if (!DerivedCoreProperties)
+                fail("Can't open DerivedCoreProperties.txt");
+
+            sprintf(dir_path, "%s/emoji-data.txt", ucd_dir);
+            FILE *EmojiData = fopen(dir_path, "r");
+            if (!EmojiData)
+                fail("Can't open Emoji-data.txt");
+
+            sprintf(dir_path, "%s/GraphemeBreakProperty.txt", ucd_dir);
+            FILE *GraphemeBreakProperty = fopen(dir_path, "r");
+            if (!GraphemeBreakProperty)
+                fail("Can't open GraphemeBreakProperty.txt");
+
+            size_t DerivedCorePropertiesLen = get_file_size(DerivedCoreProperties);
+            size_t EmojiDataLen = get_file_size(EmojiData);
+            size_t GraphemeBreakPropertyLen = get_file_size(GraphemeBreakProperty);
+
+            sbuf_mem = malloc(DerivedCorePropertiesLen + 1 + EmojiDataLen + 1 + GraphemeBreakPropertyLen + 1);
+            if (!sbuf_mem) {
+                fail("Out of memory");
+            }
+
+            char *sbuf = sbuf_mem;
+            ucd_grapheme_break_props = read_file_into_buf(GraphemeBreakProperty, GraphemeBreakPropertyLen, sbuf, &sbuf);
+            ucd_derived_core_props = read_file_into_buf(DerivedCoreProperties, DerivedCorePropertiesLen, sbuf, &sbuf);
+            ucd_emoji_data_props = read_file_into_buf(EmojiData, EmojiDataLen, sbuf, &sbuf);
+
+            fclose(GraphemeBreakProperty);
+            fclose(DerivedCoreProperties);
+            fclose(EmojiData);
+        }
+
+        /* gather required properties from all three files */
+        {
+            const char *it = ucd_grapheme_break_props.str;
+            while (parse_ucd_cat_line(it, &it, &cp_start, &cp_end, &p1, &p2)) {
+                uint8_t cat = find_category(p1);
+                if (p2.str != NULL)
+                    fail("Expected GraphemeBreakProperty line to only have 1 property");
+                if (!cat)
+                    continue;
+                for (uint32_t cp = cp_start; cp < cp_end; cp++) {
+                    properties[cp] = cat;
+                }
+            }
+        }
+
+        {
+            const char *it = ucd_emoji_data_props.str;
+
+            while (parse_ucd_cat_line(it, &it, &cp_start, &cp_end, &p1, &p2)) {
+                uint8_t cat = find_category(p1);
+                if (p2.str != NULL)
+                    fail("Expected emoji-data to only have 1 property");
+                if (!cat)
+                    continue;
+                for (uint32_t cp = cp_start; cp < cp_end; cp++) {
+                    properties[cp] = cat;
+                }
+            }
+        }
+
+        {
+            const char *it = ucd_derived_core_props.str;
+
+            while (parse_ucd_cat_line(it, &it, &cp_start, &cp_end, &p1, &p2)) {
+                if (p2.str == NULL) {
+                    continue;
+                }
+
+                /* if first value is InCB, then InCB property we need for rule GB9c is second */
+                if (!wstrv_equal(p1, WSTRV("InCB"))) {
+                    continue;
+                }
+
+                uint8_t cat = find_incb(p2);
+
+                for (uint32_t cp = cp_start; cp < cp_end; cp++) {
+                    properties[cp] |= (cat << 5);
+                }
+            }
+        }
+
+        free(sbuf_mem);
+    }
+
+    /* init property ranges */
+    {
+        uint8_t prev_prop;
+        size_t len_prop_ranges = 0;
+        /* first full iteration to calculate number of ranges */
+        {
+            size_t n_ranges = 1;
+            prev_prop = properties[0];
+            for (uint32_t cp = 0; cp < UNICODE_CODEPOINT_COUNT; cp++) {
+                uint8_t prop = properties[cp];
+                /* exclude ranges of other */
+                if (prev_prop != prop && prop != WGRAPHEME_CAT_OTHER) {
+                    n_ranges++;
+                }
+                prev_prop = prop;
+            }
+            prop_ranges = malloc(n_ranges * sizeof(*prop_ranges));
+            if (!prop_ranges)
+                fail("Out of memory");
+        }
+
+        /* fill out property ranges */
+        {
+            size_t i = 0;
+            prev_prop = properties[0];
+            prop_ranges[i] = (WPropRange) {.lower = 0x000000u, .prop = prev_prop};
+            for (uint32_t cp = 0x000001u; cp < UNICODE_CODEPOINT_COUNT; cp++) {
+                uint8_t prop = properties[cp];
+                /* exclude ranges of other */
+                if (prev_prop != prop) {
+                    if (prev_prop != WGRAPHEME_CAT_OTHER) {
+                        prop_ranges[i++].upper = cp - 1;
+                    }
+
+                    if (prop != WGRAPHEME_CAT_OTHER) {
+                        /* open new range */
+                        prop_ranges[i] = (WPropRange) {.lower = cp, .prop = prop};
+                    }
+                }
+                prev_prop = prop;
+            }
+
+            if (prev_prop != WGRAPHEME_CAT_OTHER) {
+                prop_ranges[i++].upper = UNICODE_CODEPOINT_COUNT - 1;
+            }
+
+            len_prop_ranges = i;
+        }
+
+        ctx->prop_ranges = prop_ranges;
+        ctx->len_prop_ranges = len_prop_ranges;
+    }
+}
+
+void ctx_free(WGraphemeGenCtx *ctx) { free(ctx->prop_ranges); }
+
+WGraphemeGenCtx ctx;
 
 int main(int argc, char *argv[]) {
     if (argc != 4)
@@ -313,88 +427,14 @@ int main(int argc, char *argv[]) {
     const char *ucd_dir = argv[1];
     const char *unicode_ver = argv[2];
     const char *output_file = argv[3];
-    char dir_path[1024];
-    if (strlen(ucd_dir) > sizeof(dir_path) - 26) {
-        fail("ucd_dir too long");
-    }
-    {
-        sprintf(dir_path, "%s/DerivedCoreProperties.txt", ucd_dir);
-        FILE *DerivedCoreProperties = fopen(dir_path, "r");
-        sprintf(dir_path, "%s/emoji-data.txt", ucd_dir);
-        FILE *EmojiData = fopen(dir_path, "r");
-        sprintf(dir_path, "%s/GraphemeBreakProperty.txt", ucd_dir);
-        FILE *GraphemeBreakProperty = fopen(dir_path, "r");
-        if (!(DerivedCoreProperties && EmojiData && GraphemeBreakProperty)) {
-            fail("Missing required unicode spec files");
-        }
 
-        size_t DerivedCorePropertiesLen = get_file_size(DerivedCoreProperties);
-        size_t EmojiDataLen = get_file_size(EmojiData);
-        size_t GraphemeBreakPropertyLen = get_file_size(GraphemeBreakProperty);
-
-        char *sbuf_mem = malloc(DerivedCorePropertiesLen + 1 + EmojiDataLen + 1 + GraphemeBreakPropertyLen + 1);
-        if (!sbuf_mem) {
-            fail("Out of memory");
-        }
-
-        char *sbuf = sbuf_mem;
-        ctx.DerivedCoreProperties = read_file_into_buf(DerivedCoreProperties, DerivedCorePropertiesLen, sbuf, &sbuf);
-        ctx.EmojiData = read_file_into_buf(EmojiData, EmojiDataLen, sbuf, &sbuf);
-        ctx.GraphemeBreakProperty = read_file_into_buf(GraphemeBreakProperty, GraphemeBreakPropertyLen, sbuf, &sbuf);
-
-        ctx_init_categories(&ctx);
-
-        free(sbuf_mem);
-    }
-
-    uint8_t prev_prop;
-
-    WPropertyRange *prop_ranges;
-    size_t len_prop_ranges = 0;
-
-    /* first full iteration to calculate number of ranges */
-    {
-        size_t n_ranges = 1;
-        prev_prop = ctx.properties[0];
-        for (uint32_t cp = 0; cp < UNICODE_CODEPOINT_COUNT; cp++) {
-            uint8_t prop = ctx.properties[cp];
-            /* exclude ranges of other */
-            if (prev_prop != prop && prop != WGRAPHEME_CAT_OTHER) {
-                n_ranges++;
-            }
-            prev_prop = prop;
-        }
-        prop_ranges = malloc(n_ranges * sizeof(WPropertyRange));
-        if (!prop_ranges)
-            fail("Out of memory");
-    }
-
-    /* fill out property ranges */
-    {
-        prev_prop = ctx.properties[0];
-        prop_ranges[len_prop_ranges] = (WPropertyRange) {.begin = 0x000000u, .prop = prev_prop};
-        for (uint32_t cp = 0; cp < UNICODE_CODEPOINT_COUNT; cp++) {
-            uint8_t prop = ctx.properties[cp];
-            /* exclude ranges of other */
-            if (prev_prop != prop) {
-                if (prev_prop != WGRAPHEME_CAT_OTHER) {
-                    prop_ranges[len_prop_ranges++].end = cp;
-                }
-
-                if (prop != WGRAPHEME_CAT_OTHER) {
-                    /* open new range */
-                    prop_ranges[len_prop_ranges] = (WPropertyRange) {.begin = cp, .prop = prop};
-                }
-            }
-            prev_prop = prop;
-        }
-        if (prev_prop != WGRAPHEME_CAT_OTHER) {
-            prop_ranges[len_prop_ranges++].end = UNICODE_CODEPOINT_COUNT;
-        }
-    }
+    ctx_init(&ctx, ucd_dir);
 
     /* write header file */
     {
+        size_t len_prop_ranges = ctx.len_prop_ranges;
+        WPropRange *prop_ranges = ctx.prop_ranges;
+
         FILE *res = fopen(output_file, "w");
         if (!res)
             fail("can't open output file");
@@ -407,7 +447,8 @@ int main(int argc, char *argv[]) {
         fprintf(res, "#define WGRAPHEME_RANGE_COUNT %zuu\n", len_prop_ranges);
 
         fprintf(res, "/* properties are packed bytes: (INCB << 5 | CAT). 5 bits for category, 2 for incb */\n");
-        fprintf(res, "/* codepoints from wgrapheme_range_cp_hi[i] to wgrapheme_range_cp_hi[i] inclusive, are of property wgrapheme_range_prop[i] */\n");
+        fprintf(res, "/* codepoints from wgrapheme_range_cp_hi[i] to wgrapheme_range_cp_hi[i] inclusive, are of "
+                     "property wgrapheme_range_prop[i] */\n");
 
         fprintf(res, "const uint8_t wgrapheme_range_prop[WGRAPHEME_RANGE_COUNT] = {");
         for (size_t i = 0; i < len_prop_ranges; i++) {
@@ -415,24 +456,26 @@ int main(int argc, char *argv[]) {
         }
         fprintf(res, "};\n");
 
-        /* split the [cp_begin, cp_end - 1] range into lo and hi arrays */
+        /* split the range into lo and hi arrays */
         fprintf(res, "const uint32_t wgrapheme_range_cp_hi[WGRAPHEME_RANGE_COUNT] = {");
         for (size_t i = 0; i < len_prop_ranges; i++) {
-            fprintf(res, ",%d" + (i == 0), prop_ranges[i].end - 1); /* ranges are inclusive */
+            fprintf(res, ",%d" + (i == 0), prop_ranges[i].upper);
         }
         fprintf(res, "};\n");
+
         fprintf(res, "const uint32_t wgrapheme_range_cp_lo[WGRAPHEME_RANGE_COUNT] = {");
         for (size_t i = 0; i < len_prop_ranges; i++) {
-            fprintf(res, ",%d" + (i == 0), prop_ranges[i].begin);
+            fprintf(res, ",%d" + (i == 0), prop_ranges[i].lower);
         }
         fprintf(res, "};\n");
 
         fprintf(res, "const uint16_t wgrapheme_lookup[%d] = {", LOOKUP_TABLE_LEN);
-        int lookup_range_idx = 0;
+        uint32_t lookup_range_idx = 0;
         for (size_t i = 0; i < LOOKUP_TABLE_LEN; i++) {
             uint32_t cp_lookup_from = i * LOOKUP_INTERVAL;
-            /* find first range that potentially contains this codepoint (CAT_OTHER codepoints are excluded to save space), end is exclusive thus <= */
-            while (lookup_range_idx < len_prop_ranges && prop_ranges[lookup_range_idx].end <= cp_lookup_from)
+            /* find first range that potentially contains this codepoint
+             * (CAT_OTHER codepoints are excluded to save* space) */
+            while (lookup_range_idx < len_prop_ranges && prop_ranges[lookup_range_idx].upper < cp_lookup_from)
                 lookup_range_idx += 1;
             fprintf(res, ",%d" + (i == 0), lookup_range_idx);
         }
@@ -447,6 +490,7 @@ int main(int argc, char *argv[]) {
         fclose(res);
     }
 
-    free(prop_ranges);
+    ctx_free(&ctx);
+
     return EXIT_SUCCESS;
 }

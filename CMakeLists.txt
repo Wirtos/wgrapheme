@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.23)
-project(wgrapheme LANGUAGES C VERSION 0.1.0)
+project(wgrapheme LANGUAGES C VERSION 0.2.0)
 set(CMAKE_C_STANDARD 99)
 
 option(WGRAPHEME_GENERATE_DATA OFF "Download unicode specs for WGRAPHEME_UNICODE_VERSION and re-generate data from them")
