@@ -16,7 +16,7 @@ typedef struct {
 } WPropRange;
 
 static uint8_t wgrapheme_prop_pack(enum WGraphemeCategory cat, enum WGraphemeINCB incb) {
-    return (uint8_t) (cat & 0x1F | (incb & 0x03) << 5);
+    return (uint8_t) ((cat & 0x1F) | (incb & 0x03) << 5);
 }
 
 static enum WGraphemeCategory wgrapheme_prop_cat(uint8_t prop) { return prop & 0x1F; }
@@ -124,7 +124,7 @@ static void wgrapheme_lookup_prop(uint32_t codepoint, WPropRange *cache) {
         return;
     }
 
-    idx = codepoint / WGRAPHEME_LOOKUP_INTERVAL;
+    idx = (uint16_t) (codepoint / WGRAPHEME_LOOKUP_INTERVAL);
     if (idx < arrlen(wgrapheme_lookup) - 1) {
         /* Codepoint is possibly covered by range index lookup table
          * (if it's CAT_OTHER, then there's no range covering the codepoint, and we will fail the search later) */
@@ -196,7 +196,7 @@ static void wgrapheme_lookup_prop(uint32_t codepoint, WPropRange *cache) {
  */
 /* clang-format off */
 /* https://www.unicode.org/reports/tr29/#Grapheme_Cluster_Boundary_Rules */
-static bool wgrapheme_break_simple(int left, int right) {
+static bool wgrapheme_break_simple(enum WGraphemeCategory left, enum WGraphemeCategory right) {
     return (
     /* GB1     */ (left == WGRAPHEME_CAT_START) ? true :
     /* GB3     */ (left == WGRAPHEME_CAT_CR && right == WGRAPHEME_CAT_LF) ? false :
@@ -209,11 +209,11 @@ static bool wgrapheme_break_simple(int left, int right) {
     /* ------- */ right == WGRAPHEME_CAT_LVT)) ? false :
     /* GB7     */ ((left == WGRAPHEME_CAT_LV || left == WGRAPHEME_CAT_V) &&
     /* ------- */ (right == WGRAPHEME_CAT_V || right == WGRAPHEME_CAT_T)) ? false :
-    /* GB8     */((left == WGRAPHEME_CAT_LVT || left == WGRAPHEME_CAT_T) && right == WGRAPHEME_CAT_T) ? false :
-    /* GB9     */(right == WGRAPHEME_CAT_EXTEND ||
-    /* ------- */right == WGRAPHEME_CAT_ZWJ ||
-    /* GB9a    */right == WGRAPHEME_CAT_SPACINGMARK ||
-    /* GB9b    */left == WGRAPHEME_CAT_PREPEND) ? false :
+    /* GB8     */ ((left == WGRAPHEME_CAT_LVT || left == WGRAPHEME_CAT_T) && right == WGRAPHEME_CAT_T) ? false :
+    /* GB9     */ (right == WGRAPHEME_CAT_EXTEND ||
+    /* ------- */ right == WGRAPHEME_CAT_ZWJ ||
+    /* GB9a    */ right == WGRAPHEME_CAT_SPACINGMARK ||
+    /* GB9b    */ left == WGRAPHEME_CAT_PREPEND) ? false :
     /* !!for below additional handling required in wgrapheme_break_extended since this is stateful!! */
     /* GB11    */ (left == WGRAPHEME_CAT_E_ZWG &&
     /* ------- */ right == WGRAPHEME_CAT_EXTENDED_PICTOGRAPHIC) ? false :
@@ -343,44 +343,6 @@ wgrapheme_status_t wgrapheme_next_boundary(const char *str, size_t length, size_
     }
 
     *next = length;
-    return WGRAPHEME_OK;
-}
-
-wgrapheme_status_t wgrapheme_prev_boundary(const char *str, size_t length, size_t offset, size_t *previous) {
-    uint8_t *string = (uint8_t *) str;
-    size_t cursor = 0;
-    size_t next = 0;
-    size_t last = 0;
-    wgrapheme_status_t status;
-
-    if (!string && length != 0) {
-        return WGRAPHEME_INVALID_ARGUMENT;
-    }
-    if (!previous) {
-        return WGRAPHEME_INVALID_ARGUMENT;
-    }
-    if (!wgrapheme_is_codepoint_boundary(string, length, offset)) {
-        return WGRAPHEME_INVALID_OFFSET;
-    }
-    if (offset == 0) {
-        *previous = 0;
-        return WGRAPHEME_DONE;
-    }
-
-    while (cursor < length) {
-        status = wgrapheme_next_boundary((char *) string, length, cursor, &next);
-        if (status < 0) {
-            return status;
-        }
-        if (next >= offset) {
-            *previous = last;
-            return WGRAPHEME_OK;
-        }
-        last = next;
-        cursor = next;
-    }
-
-    *previous = last;
     return WGRAPHEME_OK;
 }
 

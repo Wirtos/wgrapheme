@@ -13,7 +13,7 @@
 #include <stdint.h>
 
 #define WGRAPHEME_VER_MAJOR 0
-#define WGRAPHEME_VER_MINOR 2
+#define WGRAPHEME_VER_MINOR 3
 #define WGRAPHEME_VER_PATCH 0
 
 #ifndef WGRAPHEME_SHARED_DEFINE
@@ -82,16 +82,6 @@ WGRAPHEME_EXPORT wgrapheme_status_t wgrapheme_next_boundary(
   size_t length,
   size_t offset,
   size_t *next
-);
-
-/*
- * Find the previous grapheme boundary before `offset`.
- */
-WGRAPHEME_EXPORT wgrapheme_status_t wgrapheme_prev_boundary(
-  const char *string,
-  size_t length,
-  size_t offset,
-  size_t *previous
 );
 
 /* Count graphemes in a string */
