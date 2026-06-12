@@ -1,4 +1,4 @@
-```Cw
+```C
 char str[] = "іу👨‍👨‍👧‍👧віу";
 
 wgrapheme_status_t status;
